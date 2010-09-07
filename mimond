@@ -1,0 +1,68 @@
+#!/usr/bin/env python
+#
+# Mimon - lightweight load monitor
+# Copyright (C) 2009  Daniel Milde <info@milde.cz>
+
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/gpl-3.0.html>.
+
+config_file = '/etc/mimon.conf'
+
+import sys
+import os
+import time
+import signal
+import mimon.config
+
+try:
+	import rrdtool
+except Exception, e:
+	print "Package python-rrdtool not installed"
+	sys.exit(1)
+
+config = mimon.config.read(config_file)
+
+mods = []
+for m in config['modules']:
+	__import__("mimon."+m)
+	mods.append(sys.modules["mimon."+m])
+
+def terminate(signum, frame):
+	print 'Ending...'
+	os.remove(config['pid_file'])
+	sys.exit(0)
+signal.signal(signal.SIGTERM, terminate)
+
+if os.geteuid() != 0:
+	print 'Need to be run as root (uid = %d)' % os.geteuid()
+	sys.exit(1)
+
+if os.path.exists(config['pid_file']):
+	print 'Already running'
+	sys.exit(0)
+print 'Starting daemon'
+pid = os.fork()
+if pid > 0: # exit parent
+	sys.exit(0)
+fp = open(config['pid_file'], 'w')
+fp.write(str(os.getpid()))
+fp.close()
+for m in mods:
+	t = m.MyThread()
+	t.data_dir = config['data_dir']
+	t.start()
+try:
+	while True:
+		time.sleep(60)
+except (KeyboardInterrupt), e:
+	terminate(1, False)
